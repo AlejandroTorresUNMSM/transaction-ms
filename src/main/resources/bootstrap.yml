@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: transaction-ms-dev
+  cloud:
+    config:
+      uri: http://localhost:8888
+client:
+  ms:
+    url: http://localhost:8080/api/client
+prodpasive:
+  ms:
+    url: http://localhost:8081/api/credit
+prodactive:
+  ms:
+    url: http://localhost:8082/api/credit
