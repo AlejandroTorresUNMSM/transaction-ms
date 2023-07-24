@@ -13,3 +13,6 @@ prodpasive:
 prodactive:
   ms:
     url: http://localhost:8082/api/credit
+debit:
+  ms:
+    url: http://localhost:8084/api/credit
