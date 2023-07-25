@@ -24,6 +24,7 @@ import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
@@ -91,13 +92,19 @@ public class ReportService {
 						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe el cliente")));
 
 		// Llamada al servicio feignApiProdPasive para obtener las cuentas del cliente
-		Mono<List<AccountDto>> accountListMono = feignApiProdPasive.getAllAccountClient(clientId).collectList();
+		Mono<List<AccountDto>> accountListMono = feignApiProdPasive
+						.getAllAccountClient(clientId).collectList()
+						.onErrorResume(error -> Mono.just(Collections.emptyList()));
 
 		// Llamada al servicio feignApiProdActive para obtener los créditos del cliente
-		Mono<List<CreditDto>> creditListMono = feignApiProdActive.getAllCreditClient(clientId).collectList();
+		Mono<List<CreditDto>> creditListMono = feignApiProdActive
+						.getAllCreditClient(clientId).collectList()
+						.onErrorResume(error -> Mono.just(Collections.emptyList()));
 
 		// Llamada al servicio feignApiDebit para obtener los débitos del cliente
-		Mono<List<DebitDto>> debitListMono = feignApiDebit.getDebitClient(clientId).collectList();
+		Mono<List<DebitDto>> debitListMono = feignApiDebit
+						.getDebitClient(clientId).collectList()
+						.onErrorResume(error -> Mono.just(Collections.emptyList()));
 
 		return Mono.zip(clientMono, accountListMono, creditListMono, debitListMono)
 						.flatMap(tuple -> {
@@ -117,6 +124,40 @@ public class ReportService {
 						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No se encontró el cliente")));
 	}
 
+	/**
+	 * Metodo que trae las 10 ultimas transferencia de un debito
+	 * @param debitId debito id
+	 * @return transacciones
+	 */
+	public Flux<TransactionDto> getLastTenTransactionDebit(String debitId){
+		return feignApiDebit.getDebit(debitId)
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe el debito")))
+						.flatMap(debit -> transaccionRepository.findByFromOrderByTimestampDesc(debitId)
+										.take(10)
+										.collectList()
+										.flatMapMany(Flux::fromIterable)
+										.map(mapper::toTransDto)
+						);
+	}
+	/**
+	 * Metodo que trae las 10 ultimas transferencia de un credito
+	 * @param creditId debito id
+	 * @return transacciones
+	 */
+	public Flux<TransactionDto> getLastTenTransactioCredit(String creditId) {
+		return feignApiProdActive.getCredit(creditId)
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe el credito")))
+						.flatMapMany(creditDto -> transaccionRepository.findByFromOrderByTimestampDesc(creditId)
+										.take(10)
+										.map(mapper::toTransDto)
+						);
+	}
+
+	/**
+	 * Metodo que traer las transferencias del mes de un cliente
+	 * @param clientId client id
+	 * @return transacciones
+	 */
 	public Flux<TransactionDto> getCurrentMounthTrans(String clientId) {
 		return transaccionRepository.findTransactionAnyMounth(2023, LocalDate.now().getMonthValue())
 						.filter(trans -> trans.getClientId().equals(clientId))

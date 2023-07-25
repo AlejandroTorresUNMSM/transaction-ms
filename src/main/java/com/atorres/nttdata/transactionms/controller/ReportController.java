@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RestController
@@ -53,4 +54,14 @@ public class ReportController {
 						.doOnSuccess(v -> log.info("Transfirio en promedio " + v.getAvgAmount() + " por dia"));
 	}
 
+	@GetMapping(value = "/last10/debit/{debitId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public Flux<TransactionDto> getTenTransactionDebit(
+					@PathVariable String debitId) {
+		return reportService.getLastTenTransactionDebit(debitId);
+	}
+	@GetMapping(value = "/last10/credit/{creditId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public Flux<TransactionDto> getTenTransactionCredit(
+					@PathVariable String creditId) {
+		return reportService.getLastTenTransactioCredit(creditId);
+	}
 }

@@ -15,6 +15,9 @@ public interface TransaccionRepository extends ReactiveMongoRepository<Transacti
 	@Query("{ 'date': { $gte: ?0, $lt: ?1 } }")
 	Flux<TransactionDao> findAllByCurrentMonth(Date startOfMonth, Date startOfNextMonth);
 
+	@Query("{'from': ?0}")
+	Flux<TransactionDao> findByFromOrderByTimestampDesc(String from);
+
 	default Flux<TransactionDao> findTransactionAnyMounth(int year, int month) {
 		LocalDate startOfMonth = LocalDate.of(year, month, 1);
 		LocalDate startOfNextMonth = startOfMonth.plusMonths(1);
