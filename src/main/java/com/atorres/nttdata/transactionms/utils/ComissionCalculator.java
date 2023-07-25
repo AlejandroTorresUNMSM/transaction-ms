@@ -23,16 +23,15 @@ public class ComissionCalculator {
 	 * @param idClient id cliente
 	 * @param idAccount id cuenta
 	 * @param amount monto
-	 * @param listTrans lista transferencias del mes
+	 * @param listTrans lista transferencias del mes de una cuenta
 	 * @return BigDecimal
 	 */
 	public Mono<BigDecimal> getComission(String idClient, String idAccount, BigDecimal amount,Flux<TransactionDto> listTrans) {
 		return feignApiProdPasive.getAllAccountClient(idClient)
 						.filter(account -> account.getId().equals(idAccount))
-						.filter(account -> account.getBalance().doubleValue()>=amount.doubleValue())
 						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe la cuenta o el monto excede ")))
 						.single()
-						.flatMap(account -> getLimitTransaction(listTrans,idAccount)
+						.flatMap(account -> getLimitTransaction(listTrans)
 										.flatMap(value -> Boolean.TRUE.equals(value) ? Mono.just(new BigDecimal("0.0")) : Mono.just(getCommisionValue(account.getAccountCategory().toString())))
 										.flatMap(value -> Mono.just(amount.multiply(value))));
 	}
@@ -52,12 +51,11 @@ public class ComissionCalculator {
 	 * @param listTransaction lista de transacciones
 	 * @return boolean
 	 */
-	static Mono<Boolean> getLimitTransaction(Flux<TransactionDto> listTransaction,String idAccount) {
+	static Mono<Boolean> getLimitTransaction(Flux<TransactionDto> listTransaction) {
 		return listTransaction
-						.filter(trans -> trans.getFrom().equals(idAccount))
 						.count()
 						.flatMap(cant -> {
-							if(cant<=5){
+							if(cant<=20){
 								log.info("No excedio el limite de transacciones gratuitas cant:"+cant);
 								return Mono.just(true);
 							}else{

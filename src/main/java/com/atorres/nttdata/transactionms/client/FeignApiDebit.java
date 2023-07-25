@@ -6,7 +6,6 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import reactivefeign.spring.config.ReactiveFeignClient;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 
@@ -16,8 +15,8 @@ public interface FeignApiDebit {
 	Flux<DebitDto> getDebit(@PathVariable String debitId);
 
 	@GetMapping(value = "main-balance/{debitId}",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	Mono<BigDecimal> getMainProduct(@PathVariable String debitId);
+	Flux<BigDecimal> getMainProduct(@PathVariable String debitId);
 
 	@GetMapping(value = "all-balance/{debitId}",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	Mono<BigDecimal> getAllBalance(@PathVariable String debitId);
+	Flux<BigDecimal> getAllBalance(@PathVariable String debitId);
 }

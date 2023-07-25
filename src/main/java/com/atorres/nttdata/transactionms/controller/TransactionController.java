@@ -8,7 +8,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/transaction")
@@ -64,5 +67,35 @@ public class TransactionController {
 	public Mono<TransactionDto> transferenciaTerceros(@RequestBody RequestTransaction request) {
 		return transactionService.getTransferenciaTerceros(request)
 						.doOnSuccess(v -> log.info("Transferencia a terceros exitosa"));
+	}
+	/**.
+	 * Metodo que trae todas las transferencias de un cliente
+	 * @param clientId id del cliente
+	 * @return Flux de TransactionDao
+	 */
+	@GetMapping(value = "/all/client/{clientId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public Flux<TransactionDto> allTransaction(@PathVariable String clientId) {
+		return transactionService.getAllTransactionByClient(clientId)
+						.doOnNext(v -> log.info("Transferencia encontrada: " + v.getId()));
+	}
+	/**.
+	 * Metodo que trae todas las transferencias de un cliente
+	 * @param accountId id del cliente
+	 * @return Flux de TransactionDao
+	 */
+	@GetMapping(value = "/thismount/account/{accountId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public Flux<TransactionDto> thismountTranByAccount(@PathVariable String accountId) {
+		return transactionService.getTransactionAccount(accountId)
+						.doOnNext(v -> log.info("Transferencia encontrada: " + v.getId()));
+	}
+	/**.
+	 * Metodo que trae todas las transferencia de este mes del cliente
+	 * @param clientId id del cliente
+	 * @return Flux de TransactionDao
+	 */
+	@GetMapping(value = "/thismounth/client/{clientId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public Flux<TransactionDto> allTransactionthisMounth(@PathVariable String clientId) {
+		return transactionService.getCurrentMounthTrans(clientId)
+						.doOnNext(v -> log.info("Transferencia de este mes: " + v.getId()));
 	}
 }

@@ -1,13 +1,15 @@
 package com.atorres.nttdata.transactionms.service;
 
-import com.atorres.nttdata.transactionms.client.FeignApiClient;
-import com.atorres.nttdata.transactionms.client.FeignApiProdActive;
+import com.atorres.nttdata.transactionms.client.FeignApiDebit;
 import com.atorres.nttdata.transactionms.client.FeignApiProdPasive;
 import com.atorres.nttdata.transactionms.exception.CustomException;
 import com.atorres.nttdata.transactionms.model.RequestTransaction;
 import com.atorres.nttdata.transactionms.model.RequestTransactionAccount;
+import com.atorres.nttdata.transactionms.model.RequestRetiroDebit;
 import com.atorres.nttdata.transactionms.model.TransactionDto;
 import com.atorres.nttdata.transactionms.model.accountms.AccountDto;
+import com.atorres.nttdata.transactionms.model.debitms.DebitDto;
+import com.atorres.nttdata.transactionms.model.dto.RetiroDebit;
 import com.atorres.nttdata.transactionms.repository.TransaccionRepository;
 import com.atorres.nttdata.transactionms.utils.ComissionCalculator;
 import com.atorres.nttdata.transactionms.utils.MapperTransaction;
@@ -22,6 +24,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -30,6 +33,8 @@ import java.util.stream.Collectors;
 public class TransactionService {
 	@Autowired
 	FeignApiProdPasive feignApiProdPasive;
+	@Autowired
+	FeignApiDebit feignApiDebit;
 	@Autowired
 	MapperTransaction mapper;
 	@Autowired
@@ -45,7 +50,7 @@ public class TransactionService {
 	 */
 	public Mono<TransactionDto> retiroCuenta(RequestTransactionAccount request) {
 		return getValidAccount(request.getClientId(), request.getAccountId(), request.getAmount())
-						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(),request.getAmount(),getCurrentMounthTrans(request.getClientId()))
+						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(), request.getAmount(), getTransactionAccount(request.getAccountId()))
 										.map(value -> {
 											comisionTransferencia = value;
 											log.info("La comision asciende a: " + value);
@@ -55,9 +60,9 @@ public class TransactionService {
 							if (balanceNuevo.doubleValue() < 0) {
 								return Mono.error(new CustomException(HttpStatus.BAD_REQUEST, "El monto del retiro supera el saldo disponible en la cuenta"));
 							}
-							return feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balanceNuevo, request.getAccountId()))
+							return feignApiProdPasive.updateAccount(mapper.toUpdateAccount(balanceNuevo, request.getAccountId()))
 											.single()
-											.flatMap(ac -> transaccionRepository.save(mapper.retiroRequestToDao(request, request.getAmount(),comisionTransferencia)))
+											.flatMap(ac -> transaccionRepository.save(mapper.retiroRequestToDao(request, request.getAmount(), comisionTransferencia)))
 											.map(mapper::toTransDto);
 						});
 	}
@@ -69,15 +74,15 @@ public class TransactionService {
 	 */
 	public Mono<TransactionDto> depositoCuenta(RequestTransactionAccount request) {
 		return getValidAccount(request.getClientId(), request.getAccountId(), request.getAmount())
-						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(),request.getAmount(),getCurrentMounthTrans(request.getClientId()))
+						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(), request.getAmount(), getTransactionAccount(request.getAccountId()))
 										.map(value -> {
 											comisionTransferencia = value;
 											log.info("La comision asciende a: " + value);
 											return account.getBalance().add(request.getAmount()).subtract(value);
 										})).single()
-						.flatMap(balance -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balance, request.getAccountId()))
+						.flatMap(balance -> feignApiProdPasive.updateAccount(mapper.toUpdateAccount(balance, request.getAccountId()))
 										.single()
-										.flatMap(ac -> transaccionRepository.save(mapper.depositoRequestToDao(request, request.getAmount(),comisionTransferencia)))
+										.flatMap(ac -> transaccionRepository.save(mapper.depositoRequestToDao(request, request.getAmount(), comisionTransferencia)))
 										.map(mapper::toTransDto));
 	}
 
@@ -92,21 +97,7 @@ public class TransactionService {
 						.filter(account -> account.getId().equals(request.getTo()) || account.getId().equals(request.getFrom()))
 						.collectList()
 						.map(listAccount -> listAccount.stream().collect(Collectors.toMap(AccountDto::getId, cuenta -> cuenta)))
-						.flatMap(mapAccount -> {
-							AccountDto accountFrom = mapAccount.get(request.getFrom());
-							AccountDto accountTo = mapAccount.get(request.getTo());
-							return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), getCurrentMounthTrans(request.getClientId()))
-											.map(value -> {
-												comisionTransferencia = value;
-												log.info("La comision asciende a: " + value);
-												return modifyMapAccount(accountFrom, accountTo, value, request.getAmount());
-											});
-						})
-						.map(mapAccount -> new ArrayList<>(mapAccount.values()))
-						.flatMap(listAccount -> Flux.fromIterable(listAccount)
-										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(account.getBalance(), account.getId())))
-										.then(transaccionRepository.save(mapper.transRequestToTransDao(request, comisionTransferencia))))
-						.map(mapper::toTransDto);
+						.flatMap(mapAccount -> transactionProccess(request, mapAccount));
 	}
 
 	/**
@@ -122,27 +113,79 @@ public class TransactionService {
 						.concatWith(feignApiProdPasive.getAccount(request.getTo()))
 						.collectList()
 						.map(listAccount -> listAccount.stream().collect(Collectors.toMap(AccountDto::getId, cuenta -> cuenta)))
-						.flatMap(mapAccount -> {
-							AccountDto accountFrom = mapAccount.get(request.getFrom());
-							AccountDto accountTo = mapAccount.get(request.getTo());
-							return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), getCurrentMounthTrans(request.getClientId()))
-											.map(value -> {
-												comisionTransferencia = value;
-												log.info("La comision asciende a: " + value);
-												return modifyMapAccount(accountFrom, accountTo, value, request.getAmount());
-											});
-						})
-						.map(mapAccount -> new ArrayList<>(mapAccount.values()))
-						.flatMap(listAccount -> Flux.fromIterable(listAccount)
-										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(account.getBalance(), account.getId())))
-										.then(transaccionRepository.save(mapper.transRequestToTransDao(request, comisionTransferencia))))
+						.flatMap(mapAccount -> transactionProccess(request, mapAccount));
+	}
+
+	/**
+	 * Metodo que simula un retiro desde un debito
+	 * @param request request
+	 * @return transaction
+	 */
+	public Mono<TransactionDto> retiroDebit(RequestRetiroDebit request) {
+		return verificaAmountDebit(request)
+						.flatMap(debitDto -> comissionCalculator.getComission(request.getClientId(), debitDto.getMainProduct(), request.getAmount(), getTransactionAccount(debitDto.getMainProduct()))
+										.map(value -> {
+											comisionTransferencia = value;
+											log.info("La comision de la cuenta principal asciende a: " + value);
+											return debitDto.getProductList();
+										})).single()
+						.flatMap(productList -> Flux.fromIterable(productList)
+										.flatMap(accountId -> feignApiProdPasive.getAccount(accountId))
+										.collectList())
+						.map(accountList -> updateAccountDebit(accountList,request))
+						.flatMap(cuentaActualizadas -> Flux.fromIterable(cuentaActualizadas)
+										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toUpdateAccount(account.getBalance(), account.getId())))
+										.then(transaccionRepository.save(mapper.toTransDao(request, comisionTransferencia)))
+						)
 						.map(mapper::toTransDto);
 	}
 
-	private Mono<TransactionDto> transactionProccess(RequestTransaction request,Map<String,AccountDto> mapAccount){
+	/**
+	 * Metodo que actualiza la lista de cuentas debito
+	 * @param accountList lista cuentas
+	 * @param request request
+	 * @return lista actualizada
+	 */
+	private List<AccountDto> updateAccountDebit(List<AccountDto> accountList, RequestRetiroDebit request){
+		BigDecimal remainingAmount = request.getAmount().add(comisionTransferencia);
+		List<AccountDto> updatedAccounts = new ArrayList<>();
+		//Lista de cuenta debito
+		for (AccountDto account : accountList) {
+			BigDecimal balance = account.getBalance();
+			if (remainingAmount.doubleValue() > balance.doubleValue()) {
+				remainingAmount = remainingAmount.subtract(balance);
+				account.setBalance(BigDecimal.ZERO);
+				updatedAccounts.add(account);
+			} else {
+				account.setBalance(balance.subtract(remainingAmount));
+				updatedAccounts.add(account);
+				break;
+			}
+		}
+		return updatedAccounts;
+	}
+
+	private Mono<DebitDto> verificaAmountDebit(RequestRetiroDebit request) {
+		return feignApiDebit.getAllBalance(request.getDebit())
+						.single()
+						.flatMap(balanceTotal -> {
+							if (balanceTotal.doubleValue() >= request.getAmount().doubleValue())
+								return feignApiDebit.getDebit(request.getDebit()).single();
+							else
+								return Mono.error(new CustomException(HttpStatus.CONFLICT, "Monto supera al balance debito"));
+						});
+	}
+
+	/**
+	 * Metodo que realiza la transferencia entre las cuentas
+	 * @param request    request transaction
+	 * @param mapAccount map de cuentas
+	 * @return transactionDto
+	 */
+	private Mono<TransactionDto> transactionProccess(RequestTransaction request, Map<String, AccountDto> mapAccount) {
 		AccountDto accountFrom = mapAccount.get(request.getFrom());
 		AccountDto accountTo = mapAccount.get(request.getTo());
-		return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), this.getCurrentMounthTrans(request.getClientId()))
+		return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), getTransactionAccount(request.getFrom()))
 						.map(value -> {
 							comisionTransferencia = value;
 							log.info("La comision asciende a: " + value);
@@ -150,9 +193,33 @@ public class TransactionService {
 						})
 						.map(mapacc -> new ArrayList<>(mapacc.values()))
 						.flatMap(listAccount -> Flux.fromIterable(listAccount)
-										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(account.getBalance(), account.getId())))
+										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toUpdateAccount(account.getBalance(), account.getId())))
 										.then(transaccionRepository.save(mapper.transRequestToTransDao(request, comisionTransferencia))))
 						.map(mapper::toTransDto);
+	}
+
+	/**
+	 * Metodo que obtiene todas las transacciones de un cliente
+	 * @param clientId id del cliente
+	 * @return Flux transactionDao
+	 */
+	public Flux<TransactionDto> getAllTransactionByClient(String clientId) {
+		return transaccionRepository.findAll()
+						.filter(trans -> trans.getClientId().equals(clientId))
+						.map(mapper::toTransDto);
+
+	}
+
+	/**
+	 * Metodo que obtiene todas las transacciones de una cuenta de este mes
+	 * @param accountId id cuenta
+	 * @return Flux transactionDao
+	 */
+	public Flux<TransactionDto> getTransactionAccount(String accountId) {
+		return feignApiProdPasive.getAccount(accountId)
+						.flatMap(account -> getCurrentMounthTrans(account.getClient()))
+						.filter(transaction -> transaction.getFrom().equals(accountId));
+
 	}
 
 	/**
@@ -168,10 +235,10 @@ public class TransactionService {
 
 	/**
 	 * Metodo que valida la cuenta y el monto
-	 * @param clientId client id
+	 * @param clientId  client id
 	 * @param accountId cuenta id
-	 * @param amount monto
-	 * @return
+	 * @param amount    monto
+	 * @return accountdto
 	 */
 	private Mono<AccountDto> getValidAccount(String clientId, String accountId, BigDecimal amount) {
 		return feignApiProdPasive.getAllAccountClient(clientId)
