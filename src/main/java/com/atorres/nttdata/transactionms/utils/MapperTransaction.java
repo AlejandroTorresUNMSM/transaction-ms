@@ -12,25 +12,25 @@ import java.util.Date;
 
 @Component
 public class MapperTransaction {
-    public TransactionDao retiroRequestToDao(RequestTransactionAccount requestTransactionAccount, BigDecimal balance){
+    public TransactionDao retiroRequestToDao(RequestTransactionAccount requestTransactionAccount, BigDecimal balance,BigDecimal comision){
         TransactionDao transactionDao = new TransactionDao();
         transactionDao.setBalance(balance);
         transactionDao.setFrom(requestTransactionAccount.getAccountId());
         transactionDao.setTo("CAJERO");
         transactionDao.setCategory("RETIRO");
         transactionDao.setDate(new Date());
-        transactionDao.setComission(new BigDecimal("0.5"));
+        transactionDao.setComission(comision);
         transactionDao.setClientId(requestTransactionAccount.getClientId());
         return  transactionDao;
     }
-    public TransactionDao depositoRequestToDao(RequestTransactionAccount request, BigDecimal balance){
+    public TransactionDao depositoRequestToDao(RequestTransactionAccount request, BigDecimal balance,BigDecimal comision){
         TransactionDao transactionDao = new TransactionDao();
         transactionDao.setBalance(balance);
         transactionDao.setFrom("CAJERO");
         transactionDao.setTo(request.getAccountId());
         transactionDao.setCategory("DEPOSITO");
         transactionDao.setDate(new Date());
-        transactionDao.setComission(new BigDecimal("10.5"));
+        transactionDao.setComission(comision);
         transactionDao.setClientId(request.getClientId());
         return  transactionDao;
     }
@@ -61,6 +61,7 @@ public class MapperTransaction {
         trans.setBalance(transactionDao.getBalance());
         trans.setDate(transactionDao.getDate());
         trans.setClientId(transactionDao.getClientId());
+        trans.setComission(transactionDao.getComission());
         return  trans;
     }
 }

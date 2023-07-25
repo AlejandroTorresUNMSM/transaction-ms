@@ -19,7 +19,7 @@ public class ComissionCalculator {
 	FeignApiProdPasive feignApiProdPasive;
 
 	/**
-	 * Metodo que calcula la comision
+	 * Metodo que calcula la comision y revisa que el monto no exceda
 	 * @param idClient id cliente
 	 * @param idAccount id cuenta
 	 * @param amount monto
@@ -29,7 +29,8 @@ public class ComissionCalculator {
 	public Mono<BigDecimal> getComission(String idClient, String idAccount, BigDecimal amount,Flux<TransactionDto> listTrans) {
 		return feignApiProdPasive.getAllAccountClient(idClient)
 						.filter(account -> account.getId().equals(idAccount))
-						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe la cuenta")))
+						.filter(account -> account.getBalance().doubleValue()>=amount.doubleValue())
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe la cuenta o el monto excede ")))
 						.single()
 						.flatMap(account -> getLimitTransaction(listTrans,idAccount)
 										.flatMap(value -> Boolean.TRUE.equals(value) ? Mono.just(new BigDecimal("0.0")) : Mono.just(getCommisionValue(account.getAccountCategory().toString())))

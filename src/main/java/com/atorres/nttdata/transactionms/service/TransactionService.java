@@ -39,21 +39,27 @@ public class TransactionService {
 	private BigDecimal comisionTransferencia;
 
 	/**
-	 * Metodo que simula un retiro por cajero
-	 * @param request request de la transaccion
-	 * @return Mono transactionDao
+	 * Metodo que hace un retiro de una cuenta
+	 * @param request request transaction
+	 * @return transactiondto
 	 */
 	public Mono<TransactionDto> retiroCuenta(RequestTransactionAccount request) {
-		return feignApiProdPasive.getAllAccountClient(request.getClientId())
-						.filter(account -> account.getId().equals(request.getAccountId()))
-						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe cuenta para ese cliente")))
-						.filter(accountDao -> accountDao.getBalance().doubleValue()>=request.getAmount().doubleValue() && request.getAmount().doubleValue()>0)
-						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "Ingreso un monto invalido")))
-						.single()
-						.map(accountDto -> accountDto.getBalance().subtract(request.getAmount()))
-						.map(balance -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balance, request.getAccountId())))
-						.flatMap(ac -> transaccionRepository.save(mapper.retiroRequestToDao(request, request.getAmount())))
-						.map(mapper::toTransDto);
+		return getValidAccount(request.getClientId(), request.getAccountId(), request.getAmount())
+						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(),request.getAmount(),getCurrentMounthTrans(request.getClientId()))
+										.map(value -> {
+											comisionTransferencia = value;
+											log.info("La comision asciende a: " + value);
+											return account.getBalance().subtract(request.getAmount()).subtract(value);
+										})).single()
+						.flatMap(balanceNuevo -> {
+							if (balanceNuevo.doubleValue() < 0) {
+								return Mono.error(new CustomException(HttpStatus.BAD_REQUEST, "El monto del retiro supera el saldo disponible en la cuenta"));
+							}
+							return feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balanceNuevo, request.getAccountId()))
+											.single()
+											.flatMap(ac -> transaccionRepository.save(mapper.retiroRequestToDao(request, request.getAmount(),comisionTransferencia)))
+											.map(mapper::toTransDto);
+						});
 	}
 
 	/**
@@ -62,16 +68,17 @@ public class TransactionService {
 	 * @return Mono transactionDao
 	 */
 	public Mono<TransactionDto> depositoCuenta(RequestTransactionAccount request) {
-		return feignApiProdPasive.getAllAccountClient(request.getClientId())
-						.filter(account -> account.getId().equals(request.getAccountId()))
-						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe cuenta para ese cliente")))
-						.filter(accountDao -> 0 < request.getAmount().doubleValue() && accountDao.getBalance().doubleValue() > 0)
-						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "Ingreso un monto invalido")))
-						.single()
-						.map(account -> account.getBalance().add(request.getAmount()))
-						.map(balance -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balance,request.getAccountId())).single())
-						.flatMap(accountDto -> transaccionRepository.save(mapper.depositoRequestToDao(request,request.getAmount())))
-						.map(mapper::toTransDto);
+		return getValidAccount(request.getClientId(), request.getAccountId(), request.getAmount())
+						.flatMap(account -> comissionCalculator.getComission(request.getClientId(), request.getAccountId(),request.getAmount(),getCurrentMounthTrans(request.getClientId()))
+										.map(value -> {
+											comisionTransferencia = value;
+											log.info("La comision asciende a: " + value);
+											return account.getBalance().add(request.getAmount()).subtract(value);
+										})).single()
+						.flatMap(balance -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(balance, request.getAccountId()))
+										.single()
+										.flatMap(ac -> transaccionRepository.save(mapper.depositoRequestToDao(request, request.getAmount(),comisionTransferencia)))
+										.map(mapper::toTransDto));
 	}
 
 	/**
@@ -103,6 +110,52 @@ public class TransactionService {
 	}
 
 	/**
+	 * Metodo para transferencia a terceros
+	 * @param request request
+	 * @return transactionDao
+	 */
+	public Mono<TransactionDto> getTransferenciaTerceros(RequestTransaction request) {
+		return feignApiProdPasive.getAllAccountClient(request.getClientId())
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.BAD_REQUEST, "No hay cuentas ligadas a este cliente")))
+						.filter(account -> account.getId().equals(request.getFrom()))
+						.single()
+						.concatWith(feignApiProdPasive.getAccount(request.getTo()))
+						.collectList()
+						.map(listAccount -> listAccount.stream().collect(Collectors.toMap(AccountDto::getId, cuenta -> cuenta)))
+						.flatMap(mapAccount -> {
+							AccountDto accountFrom = mapAccount.get(request.getFrom());
+							AccountDto accountTo = mapAccount.get(request.getTo());
+							return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), getCurrentMounthTrans(request.getClientId()))
+											.map(value -> {
+												comisionTransferencia = value;
+												log.info("La comision asciende a: " + value);
+												return modifyMapAccount(accountFrom, accountTo, value, request.getAmount());
+											});
+						})
+						.map(mapAccount -> new ArrayList<>(mapAccount.values()))
+						.flatMap(listAccount -> Flux.fromIterable(listAccount)
+										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(account.getBalance(), account.getId())))
+										.then(transaccionRepository.save(mapper.transRequestToTransDao(request, comisionTransferencia))))
+						.map(mapper::toTransDto);
+	}
+
+	private Mono<TransactionDto> transactionProccess(RequestTransaction request,Map<String,AccountDto> mapAccount){
+		AccountDto accountFrom = mapAccount.get(request.getFrom());
+		AccountDto accountTo = mapAccount.get(request.getTo());
+		return comissionCalculator.getComission(request.getClientId(), accountFrom.getId(), request.getAmount(), this.getCurrentMounthTrans(request.getClientId()))
+						.map(value -> {
+							comisionTransferencia = value;
+							log.info("La comision asciende a: " + value);
+							return modifyMapAccount(accountFrom, accountTo, value, request.getAmount());
+						})
+						.map(mapacc -> new ArrayList<>(mapacc.values()))
+						.flatMap(listAccount -> Flux.fromIterable(listAccount)
+										.flatMap(account -> feignApiProdPasive.updateAccount(mapper.toRequestUpdateAccount(account.getBalance(), account.getId())))
+										.then(transaccionRepository.save(mapper.transRequestToTransDao(request, comisionTransferencia))))
+						.map(mapper::toTransDto);
+	}
+
+	/**
 	 * Metodo que traer las transacciones del cliente durante el mes
 	 * @param clientId client id
 	 * @return transacciones
@@ -111,6 +164,22 @@ public class TransactionService {
 		return transaccionRepository.findTransactionAnyMounth(2023, LocalDate.now().getMonthValue())
 						.filter(trans -> trans.getClientId().equals(clientId))
 						.map(mapper::toTransDto);
+	}
+
+	/**
+	 * Metodo que valida la cuenta y el monto
+	 * @param clientId client id
+	 * @param accountId cuenta id
+	 * @param amount monto
+	 * @return
+	 */
+	private Mono<AccountDto> getValidAccount(String clientId, String accountId, BigDecimal amount) {
+		return feignApiProdPasive.getAllAccountClient(clientId)
+						.filter(account -> account.getId().equals(accountId))
+						.single()
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "No existe cuenta para ese cliente")))
+						.filter(accountDao -> amount.doubleValue() > 0)
+						.switchIfEmpty(Mono.error(new CustomException(HttpStatus.NOT_FOUND, "Ingreso un monto invalido")));
 	}
 
 	/**

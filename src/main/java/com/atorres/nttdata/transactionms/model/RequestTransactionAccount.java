@@ -7,6 +7,6 @@ import java.math.BigDecimal;
 @Data
 public class RequestTransactionAccount {
     private String accountId;
-    private String clientId;
     private BigDecimal amount;
+    private String clientId;
 }
