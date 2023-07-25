@@ -79,8 +79,8 @@ public class TransactionController {
 						.doOnNext(v -> log.info("Transferencia encontrada: " + v.getId()));
 	}
 	/**.
-	 * Metodo que trae todas las transferencias de un cliente
-	 * @param accountId id del cliente
+	 * Metodo que trae todas las transferencias de una cuenta
+	 * @param accountId cuenta id
 	 * @return Flux de TransactionDao
 	 */
 	@GetMapping(value = "/thismount/account/{accountId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

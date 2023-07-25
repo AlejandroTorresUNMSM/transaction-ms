@@ -14,6 +14,9 @@ public interface FeignApiDebit {
 	@GetMapping(value = "{debitId}",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	Flux<DebitDto> getDebit(@PathVariable String debitId);
 
+	@GetMapping(value = "client/{clientId}",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	Flux<DebitDto> getDebitClient(@PathVariable String clientId);
+
 	@GetMapping(value = "main-balance/{debitId}",produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	Flux<BigDecimal> getMainProduct(@PathVariable String debitId);
 
